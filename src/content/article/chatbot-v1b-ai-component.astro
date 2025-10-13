@@ -1,0 +1,222 @@
+---
+// Get the `id`, `title`, and `prompt` props passed to this component
+const { id, title = "Try it out: Basic Chatbot", prompt = "" } = Astro.props;
+
+// Ensure an ID is provided to prevent errors
+if (!id) {
+    throw new Error('The `id` prop is required for this component.');
+}
+---
+
+<!-- Added axios dependency here for network calls -->
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+/* Custom style for the chat window container */
+.chat-window {
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 12px;
+}
+/* Ensure the scroll position adjusts automatically */
+</style>
+
+<script define:vars={{ id, prompt }}>
+document.addEventListener('DOMContentLoaded', () => {
+    // Get the container element using the passed-in `id` prop.
+    const container = document.getElementById(id);
+    if (!container) {
+        console.error('Component container not found.');
+        return;
+    }
+
+    // Now, use querySelector on the container to find the specific elements within it.
+    const generateBtn = container.querySelector(`#generateBtn-${id}`);
+    const promptInput = container.querySelector(`#promptInput-${id}`);
+    const chatHistory = container.querySelector(`#chatHistory-${id}`); // Updated ID for conversation container
+    const apiMessages = container.querySelector(`#apiMessages-${id}`); // Selector for the API messages display
+    const loadingSpinner = container.querySelector(`#loadingSpinner-${id}`);
+
+    // Global variable to store conversation history, starting with the system instruction
+    let conversationHistory = [
+        {
+            role: "system",
+            content: "You are a helpful assistant that responds with brief answers"
+        }
+    ];
+
+    /**
+     * Appends a message bubble to the chat history container and optionally stores it in conversationHistory.
+     * @param {string} sender - 'user' or 'ai'
+     * @param {string} text - The content of the message
+     * @param {boolean} [isInternal=false] - If true, the message is displayed but NOT added to history (e.g., initial greeting).
+     */
+    const appendMessage = (sender, text, isInternal = false) => {
+        const messageWrapper = document.createElement('div');
+        const messageBubble = document.createElement('div');
+        
+        // Styling based on sender
+        if (sender === 'user') {
+            // User message: aligned right, dark gray background
+            messageWrapper.className = 'flex justify-end';
+            messageBubble.className = 'bg-gray-900 text-white p-3 max-w-lg rounded-xl rounded-br-none shadow-md whitespace-pre-wrap';
+        } else {
+            // AI message: aligned left, gray background
+            messageWrapper.className = 'flex justify-start';
+            messageBubble.className = 'bg-white text-gray-800 p-3 max-w-lg rounded-xl rounded-bl-none shadow-md whitespace-pre-wrap';
+        }
+        
+        messageBubble.textContent = text;
+        messageWrapper.appendChild(messageBubble);
+        chatHistory.appendChild(messageWrapper);
+
+        // Store message in history if it's not an internal message
+        if (!isInternal) {
+            const role = sender === 'user' ? 'user' : 'assistant'; // API uses 'assistant' for AI responses
+            conversationHistory.push({ role, content: text });
+        }
+
+        // Scroll to the bottom of the chat history
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    };
+    
+    // Initial welcome message (set as internal so it doesn't pollute the API messages array)
+    appendMessage('ai', "Hello! I am a helpful assistant. How can I help you today?", true);
+
+    /**
+     * Handles the asynchronous text generation process for the chatbot.
+     */
+    const generateText = async () => {
+        const userPrompt = promptInput.value.trim();
+        if (!userPrompt) return;
+        
+        // 1. Display user message and update history
+        // The appendMessage function handles adding the user message to conversationHistory.
+        appendMessage('user', userPrompt); 
+        
+        // Construct the JSON payload using the entire conversation history
+        const payload = {
+            model: "openai",
+            messages: conversationHistory, // <-- Now includes system role, user, and previous AI messages
+            private: true
+        };
+        
+        // Stringify the messages array for display (2 spaces for indentation)
+        const messagesJson = JSON.stringify(payload.messages, null, 2); 
+            
+        // Populate the API Messages Array container with the full history payload
+        if (apiMessages) {
+            apiMessages.textContent = messagesJson;
+        }
+
+        // Clear input field and set focus
+        promptInput.value = '';
+        promptInput.focus();
+        
+        // 2. Display a temporary loading spinner message within the chat
+        const loadingWrapper = document.createElement('div');
+        loadingWrapper.className = 'flex justify-start items-center text-gray-500 space-x-2 p-3';
+        loadingWrapper.innerHTML = `
+            <div class="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-blue-500"></div>
+            <span>AI is typing...</span>
+        `;
+        chatHistory.appendChild(loadingWrapper);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+        
+        // Disable button during generation
+        generateBtn.disabled = true;
+
+        try {
+            // New POST API endpoint
+            const apiUrl = 'https://text.pollinations.ai/openai?_=${Date.now()}';
+            
+            // Use axios.post to send the JSON payload
+            const response = await axios.post(apiUrl, payload);
+            
+            // Extract the generated text from the structured JSON response
+            const generatedText = response.data.choices[0].message.content;
+
+            // 3. Display AI response and update history
+            // The appendMessage function handles adding the AI response to conversationHistory.
+            appendMessage('ai', generatedText);
+
+        } catch (error) {
+            console.error('Error fetching text:', error);
+            // Check if it's a specific Axios error to provide more detail
+            let errorMessage = "I apologize, I failed to generate a response. Please check the console for details.";
+            if (error.response && error.response.data && error.response.data.error) {
+                 errorMessage = `API Error: ${error.response.data.error.message || 'Unknown error.'}`;
+            }
+
+            // Display error message (not stored in history)
+            appendMessage('ai', errorMessage, true); 
+        } finally {
+            // Remove the temporary loading message
+            if (loadingWrapper.parentNode === chatHistory) {
+                chatHistory.removeChild(loadingWrapper);
+            }
+            // Re-enable the button
+            generateBtn.disabled = false;
+        }
+    };
+
+    // Check if elements exist before adding event listeners
+    if (generateBtn && promptInput) {
+        // Click event for the button
+        generateBtn.addEventListener('click', generateText);
+
+        // Keydown event for the input field to trigger on "Enter"
+        promptInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); // Prevent the default form submission behavior
+                generateText();
+            }
+        });
+    }
+});
+</script>
+<div id={id}>
+    <main class="w-full mb-8 overflow-hidden bg-gray-50">
+        <div class="px-4 py-2 text-left text-gray-500 font-mono bg-gray-100">
+            {title}
+        </div>
+        <div class="p-4 flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4">
+            <!-- Left Column: Input Prompt and Generate Button -->
+            <div class="flex flex-col md:w-1/2">
+                <label for={`promptInput-${id}`} class="text-gray-700 font-semibold mb-2">Enter your message:</label>
+                <textarea 
+                    id={`promptInput-${id}`} 
+                    placeholder="Type your message" 
+                    class="h-32 p-3 border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                >{prompt}</textarea>
+
+                <label for={`apiMessages-${id}`} class="text-gray-700 font-semibold mt-4 mb-2"><span class="mr-2">📄</span>API Messages </label>
+                <div id={`apiMessages-${id}`} class=" h-32 p-3 border border-gray-300 bg-gray-200 text-gray-800 overflow-y-auto whitespace-pre-wrap"></div>
+                
+                <button id={`generateBtn-${id}`} class="mt-4 bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 transition duration-300 ease-in-out">
+                    Send Message
+                </button>
+            </div>
+            
+            <!-- Right Column: Conversation History -->
+            <div class="md:w-1/2">
+                <div class="flex items-center text-gray-700 font-semibold mb-2">
+                    <span class="mr-2">💬</span>Conversation History
+                </div>
+                <!-- This container now holds the chat bubbles -->
+                <div id={`chatHistory-${id}`} class="chat-window h-96 border border-gray-300 bg-gray-200 text-gray-800 relative">
+                    <!-- Messages will be injected here by JavaScript -->
+                </div>
+                <!-- Removed placeholderText and loadingSpinner elements from HTML as they are now handled dynamically inside chatHistory -->
+                <div id={`loadingSpinner-${id}`} class="hidden"></div> 
+            </div>
+        </div>
+
+        <div class="px-4 py-2 text-base text-right text-gray-400">
+            Free API provided by <a href="https://pollinations.ai/" target="_blank">pollinations.ai</a>. If you experience errors, try different prompts or try again later.
+        </div>
+    </main>
+</div>

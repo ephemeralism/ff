@@ -24,11 +24,23 @@ const showCategory = SiteOptions.showCategoryOnPosts || false
 
   <!-- Light Horizontal Bar -->
   <hr class="border-t border-gray-200 dark:border-gray-700 my-8" />
-
+    <div class="mt-8">
+      <p class="mb-3">Hello! I'm Samuel. Here I share my personal exploration into AI. 
+      </p>
+      <p class="mb-3">This blog is for people like myself who are interested in AI fundamentals and applications, not engineering (there are plenty of great resources for that). 
+      I'm a big believer in hands-on learning. That's why you'll find interactive apps in some articles — to showcase concepts and help you develop intuition without having to write or deploy any code
+      </p>
+      <p class="mb-3">I use AI tools to assist with my writing, visuals and code so that I can be more productive without taking away the value of what I share. This is about hands-on learning after all :)
+      </p>   
+      <p>
+      Drop me a note: feedforwardblog [at] gmail [dot] com
+      </p>
+    </div>
+  <hr class="border-t border-gray-200 dark:border-gray-700 my-8" />
   <!-- Featured Blog Posts -->
 
   {
-    SiteOptions.showFeaturrdPostsOnHomePage && featuredPosts.length > 0 && (
+    SiteOptions.showFeaturrdPostsOnHomePage && latestPosts.length > 0 && (
       <section class="mb-16">
         {SiteOptions.labels.featuredPosts && <h2 class="text-2xl font-semibold mb-8 text-center">{SiteOptions.labels.featuredPosts}</h2>}
         <div class="grid grid-cols-1 md:grid-cols-3 gap-8">

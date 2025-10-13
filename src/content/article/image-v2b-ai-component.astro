@@ -1,0 +1,219 @@
+---
+// Get the `id`, `title`, and `prompt` props passed to this component
+const { id, title = "Try it out: Image generation with prompt presets", prompt = "" } = Astro.props;
+
+// Get a new prop for the prompt presets.
+// Example: { "story": "Story Preset", "poem": "Poem Preset" }
+const { promptPresets = {} } = Astro.props;
+
+// Ensure an ID is provided to prevent errors
+if (!id) {
+    throw new Error('The `id` prop is required for this component.');
+}
+---
+
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script define:vars={{ id, promptPresets }}>
+document.addEventListener('DOMContentLoaded', () => {
+    // Get the container element using the passed-in `id` prop.
+    const container = document.getElementById(id);
+    if (!container) {
+        console.error('Component container not found.');
+        return;
+    }
+
+    // Now, use querySelector on the container to find the specific elements within it.
+    const generateBtn = container.querySelector(`#generateBtn-${id}`);
+    const promptInput = container.querySelector(`#promptInput-${id}`);
+    const aiText = container.querySelector(`#aiText-${id}`);
+    const aiImage = container.querySelector(`#aiImage-${id}`);
+    const placeholderText = container.querySelector(`#placeholderText-${id}`);
+    const loadingSpinner = container.querySelector(`#loadingSpinner-${id}`);
+    const promptPresetContainer = container.querySelector(`#promptPresetContainer-${id}`);
+    const promptPresetDropdown = container.querySelector(`#promptPresetDropdown-${id}`);
+    const randomPromptLink = container.querySelector(`#randomPromptLink-${id}`);
+
+    // Populate the dropdown with presets from the promptPresets prop, if available.
+    if (Object.keys(promptPresets).length > 0) {
+        
+        for (const [key, value] of Object.entries(promptPresets)) {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = key;
+            promptPresetDropdown.appendChild(option);
+        }
+
+        // Add a default "None" option
+        const noneOption = document.createElement('option');
+        noneOption.value = "";
+        noneOption.textContent = "None";
+        promptPresetDropdown.appendChild(noneOption);
+
+        promptPresetContainer.classList.remove('hidden');
+    } else {
+        promptPresetContainer.classList.add('hidden');
+    }
+
+    // Function to handle the two-step generation process
+    const generateContent = async () => {
+        const userPrompt = promptInput.value.trim();
+        if (!userPrompt) return;
+        
+        // Hide previous results and show loading spinner
+        placeholderText.classList.add('hidden');
+        aiImage.classList.add('hidden');
+        loadingSpinner.classList.remove('hidden');
+
+        try {
+            const selectedPresetTemplate = promptPresetDropdown.value;
+            let finalImagePrompt = userPrompt;
+
+            // Check if a prompt preset is selected (i.e., the value is not an empty string)
+            if (selectedPresetTemplate) {
+                // STEP 1: Generate text from the modified prompt
+                const promptForTextAPI = selectedPresetTemplate.replace('$userPrompt', userPrompt);
+                const textUrl = `https://text.pollinations.ai/${encodeURIComponent(promptForTextAPI)}?_=${Date.now()}`;
+                const textResponse = await axios.get(textUrl);
+                const generatedText = textResponse.data;
+
+                // Display the generated text in the left column
+                aiText.textContent = generatedText;
+                aiText.classList.remove('hidden');
+
+                // Set the final prompt for the image
+                finalImagePrompt = generatedText;
+            } else {
+                // Skip text generation and use the user's prompt directly
+                aiText.textContent = userPrompt;
+                aiText.classList.remove('hidden');
+            }
+            
+            // STEP 2: Generate an image using the final prompt
+            const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalImagePrompt)}?_=${Date.now()}&nologo=true&private=true`;
+            
+            // Set the image src directly, the browser will handle the request
+            aiImage.src = imageUrl;
+
+            // Wait for the image to load before hiding the spinner
+            aiImage.onload = () => {
+                loadingSpinner.classList.add('hidden');
+                aiImage.classList.remove('hidden');
+            };
+
+            // Handle image load errors
+            aiImage.onerror = () => {
+                loadingSpinner.classList.add('hidden');
+                placeholderText.textContent = 'Failed to load generated image.';
+                placeholderText.classList.remove('hidden');
+            };
+
+        } catch (error) {
+            console.error('Error fetching data:', error);
+            loadingSpinner.classList.add('hidden');
+            placeholderText.textContent = 'Failed to generate content. Please try again.';
+            placeholderText.classList.remove('hidden');
+        }
+    };
+    
+    // Function to handle generating a random prompt
+    const generateRandomPrompt = async () => {
+        // Disable the link and show a loading state
+        randomPromptLink.textContent = '...';
+        randomPromptLink.classList.add('pointer-events-none');
+        
+        try {
+            const promptForTextAPI = "Generate a short image prompt about a random subject with random characteristic or action, limit to 8 words and below. Respond only with image prompt";
+            const textUrl = `https://text.pollinations.ai/${encodeURIComponent(promptForTextAPI)}?_=${Date.now()}`;
+            const textResponse = await axios.get(textUrl);
+            
+            // Update the textarea with the new prompt
+            promptInput.value = textResponse.data;
+
+            // Clear the aiText container from previous generations
+            aiText.textContent = '';
+            
+        } catch (error) {
+            console.error('Error generating random prompt:', error);
+            // On error, revert the text and re-enable
+            promptInput.value = 'Failed to generate random prompt.';
+        } finally {
+            // Revert the link text and enable it
+            randomPromptLink.textContent = 'Random';
+            randomPromptLink.classList.remove('pointer-events-none');
+        }
+    };
+
+    // Check if elements exist before adding event listeners
+    if (generateBtn && promptInput && randomPromptLink) {
+        // Click event for the main generate button
+        generateBtn.addEventListener('click', generateContent);
+
+        // Click event for the random prompt link
+        randomPromptLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            generateRandomPrompt();
+        });
+
+        // Keydown event for the input field to trigger on "Enter"
+        promptInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); // Prevent the default form submission behavior
+                generateContent();
+            }
+        });
+    }
+});
+</script>
+<div id={id}>
+    <main class="w-full mb-8 overflow-hidden bg-gray-50">
+        <div class="px-4 py-2 text-left text-gray-500 font-mono bg-gray-100">
+            {title}
+        </div>
+        
+        <!-- Main Content Flex Container -->
+        <div class="p-4 flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4">
+            <!-- Left Column: Input Prompt and Generated Text -->
+            <div class="flex flex-col md:w-1/2">
+                <div class="flex justify-between items-center mb-2">
+                    <label for={`promptInput-${id}`} class="text-gray-700 font-semibold">Enter your prompt:</label>
+                    <a id={`randomPromptLink-${id}`} href="#" class="text-blue-600 hover:underline">Random</a>
+                </div>
+                <textarea id={`promptInput-${id}`} placeholder="Enter your prompt here..." class="h-32 p-3 border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none">{prompt}</textarea>
+                
+                <!-- Prompt Preset Dropdown -->
+                <div id={`promptPresetContainer-${id}`} class="mt-4 hidden">
+                    <label for={`promptPresetDropdown-${id}`} class="text-gray-700 font-semibold mb-2">Prompt preset:</label>
+                    <select id={`promptPresetDropdown-${id}`} class="w-full p-3 border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <!-- Options will be populated by JavaScript -->
+                    </select>
+                </div>
+
+                <label for={`aiText-${id}`} class="text-gray-700 font-semibold mt-4 mb-2"><span class="mr-2">🤖</span> AI Text</label>
+                <div id={`aiText-${id}`} class=" h-32 p-3 border border-gray-300 bg-gray-200 text-gray-800 overflow-y-auto whitespace-pre-wrap"></div>
+
+                <button id={`generateBtn-${id}`} class="mt-4 bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-blue-700 transition duration-300 ease-in-out">
+                    Generate Content
+                </button>
+            </div>
+            
+            <!-- Right Column: AI Image -->
+            <div class="md:w-1/2">
+                <div class="flex items-center text-gray-700 font-semibold mb-2">
+                    <span class="mr-2">🖼️</span> AI Image
+                </div>
+                <div id={`imageContainer-${id}`} class="flex justify-center items-center h-96 border border-gray-300 bg-gray-200 text-gray-800 overflow-hidden relative p-4 text-left">
+                    <p id={`placeholderText-${id}`} class="text-gray-500 text-center">Your generated image will appear here.</p>
+                    <img id={`aiImage-${id}`} class="hidden w-full h-full object-contain" src="#" alt="Generated AI Image" />
+                    <div id={`loadingSpinner-${id}`} class="hidden absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                        <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500"></div>
+                    </div>
+                </div>  
+            </div>
+        </div>
+        <div class="px-4 py-2 text-base text-right text-gray-400">
+            Free API provided by <a href="https://pollinations.ai/" target="_blank">pollinations.ai</a>. If you experience errors, try different prompts or try again later.
+        </div>
+    </main>
+</div>

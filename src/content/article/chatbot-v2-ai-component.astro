@@ -1,0 +1,325 @@
+---
+// Get the `id`, `title`, and `userPromptValue` props passed to this component
+const { 
+    id, 
+    title = "Try it out: Multi Chatbot", 
+    userPromptValue = "", 
+    // systemPromptOptions is now an object (key:value pairs)
+    systemPromptOptions = {
+        "Travel Assistant": "You are a highly experienced, cheerful travel assistant. Respond in a way that's related to travel. Prefer short responses unless more details are requested",
+    }
+} = Astro.props;
+
+// Ensure an ID is provided to prevent errors
+if (!id) {
+    throw new Error('The `id` prop is required for this component.');
+}
+---
+
+<!-- Added axios dependency here for network calls -->
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+/* Custom style for the chat window container */
+.chat-window {
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 12px;
+}
+</style>
+
+<script define:vars={{ id, userPromptValue, systemPromptOptions }}>
+    // Helper function to find elements within the component container
+    const $ = (selector) => document.querySelector(selector);
+    const $id = (name) => $(`#${name}-${id}`);
+    
+    // We wrap the entire setup in a function to run it immediately when the script loads.
+    const initializeChatbot = () => {
+        const container = document.getElementById(id);
+        if (!container) {
+            // Use a short delay fallback in case the HTML isn't immediately ready
+            setTimeout(initializeChatbot, 50);
+            return;
+        }
+
+        // --- Element Lookups ---
+        const chatForm = $id('chatForm');
+        const generateBtn = $id('generateBtn');
+        const userPromptInput = $id('userPromptInput');
+        const systemPromptSelect = $id('systemPromptSelect');
+        const systemPromptTextarea = $id('systemPromptTextarea');
+        const chatHistory = $id('chatHistory');
+
+        // --- State Initialization (UPDATED FOR OBJECT) ---
+        
+        const promptKeys = Object.keys(systemPromptOptions);
+
+        const initialSelectedLabel = promptKeys.length > 0 
+            ? promptKeys[0] 
+            : "Default Assistant";
+
+        const initialSystemPromptContent = promptKeys.length > 0 
+            ? systemPromptOptions[promptKeys[0]] 
+            : "You are a helpful assistant that responds with brief answers";
+
+        let conversationHistory = [
+            {
+                role: "system",
+                content: initialSystemPromptContent
+            }
+        ];
+        
+        // --- Utility Function: Message Appender ---
+
+        const appendMessage = (sender, text, isInternal = false) => {
+            const messageWrapper = document.createElement('div');
+            const messageBubble = document.createElement('div');
+            
+            // Set styles
+            messageWrapper.className = sender === 'user' ? 'flex justify-end' : 'flex justify-start';
+            messageBubble.className = sender === 'user' 
+                ? 'bg-gray-900 text-white p-3 max-w-lg rounded-xl rounded-br-none shadow-md whitespace-pre-wrap'
+                : 'bg-white text-gray-800 p-3 max-w-lg rounded-xl rounded-bl-none shadow-md whitespace-pre-wrap';
+            
+            messageBubble.textContent = text;
+            messageWrapper.appendChild(messageBubble);
+            chatHistory.appendChild(messageWrapper);
+
+            // Update history
+            if (!isInternal) {
+                conversationHistory.push({ role: sender === 'user' ? 'user' : 'assistant', content: text });
+            }
+
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        };
+
+        // --- System Prompt Textarea Setup ---
+
+        if (systemPromptTextarea) {
+            // Set initial value from the default bot
+            systemPromptTextarea.value = initialSystemPromptContent;
+
+            // Listener for manual editing of the system prompt
+            systemPromptTextarea.addEventListener('input', () => {
+                const newSystemPromptValue = systemPromptTextarea.value.trim();
+                
+                // Update history with the new system instruction and clear chat
+                conversationHistory = [{ role: "system", content: newSystemPromptValue }];
+                chatHistory.innerHTML = '';
+                
+                // Reset user prompt to default value
+                if (userPromptInput) {
+                    userPromptInput.value = userPromptValue;
+                }
+                
+                // Display status message
+                appendMessage('ai', `System Instruction manually edited. Starting a new conversation.`, true);
+            });
+        }
+
+
+        // --- Dropdown Population & Listener Setup (UPDATED FOR OBJECT) ---
+
+        if (systemPromptSelect) {
+            // FIX: Clear existing options to prevent duplication on re-load
+            systemPromptSelect.innerHTML = ''; 
+
+            // Iterate over the object entries ([label, value])
+            Object.entries(systemPromptOptions).forEach(([label, value]) => {
+                const opt = document.createElement('option');
+                opt.value = value; // The instruction content is the option's value
+                opt.textContent = label; // The key is the label displayed to the user
+                systemPromptSelect.appendChild(opt);
+            });
+
+            systemPromptSelect.addEventListener('change', () => {
+                const newSystemPromptValue = systemPromptSelect.value;
+                
+                // 1. Update the editable Textarea with the selected bot's value
+                if (systemPromptTextarea) {
+                    systemPromptTextarea.value = newSystemPromptValue;
+                }
+
+                // 2. Reset conversation history
+                conversationHistory = [{ role: "system", content: newSystemPromptValue }];
+                chatHistory.innerHTML = '';
+                
+                // 3. Reset user prompt to default value
+                if (userPromptInput) {
+                    userPromptInput.value = userPromptValue;
+                }
+                
+                // 4. Display status message
+                const selectedLabel = systemPromptSelect.options[systemPromptSelect.selectedIndex].text;
+                appendMessage('ai', `Bot selected: ${selectedLabel}. Starting a new conversation.`, true);
+            });
+        }
+
+        // Set initial value for the user prompt input
+        if (userPromptInput) {
+            userPromptInput.value = userPromptValue;
+        }
+
+        // Initial welcome message (only if chat is empty)
+        if (chatHistory.children.length === 0) {
+            appendMessage('ai', `Bot selected: ${initialSelectedLabel}. Starting a new conversation.`, true);
+        }
+
+        // --- Core Logic: Handle Form Submission (Click or Enter Key) ---
+
+        /**
+         * Handles the form submission (triggered by button click or Enter key press).
+         */
+        const handleGenerateText = async (event) => {
+            // Prevent default form submission (which causes a page reload)
+            event.preventDefault(); 
+            
+            const userPrompt = userPromptInput.value.trim();
+            if (!userPrompt || generateBtn.disabled) return;
+            
+            // 1. Display user message and update history
+            appendMessage('user', userPrompt); 
+            
+            // 2. Prepare payload and UI
+            
+            // Ensure the system message is the latest from the editable textarea before sending
+            const currentSystemPrompt = systemPromptTextarea ? systemPromptTextarea.value.trim() : initialSystemPromptContent;
+            
+            // Update the system instruction in the history array immediately before sending
+            if (conversationHistory.length === 0 || conversationHistory[0].role !== 'system') {
+                conversationHistory.unshift({ role: "system", content: currentSystemPrompt });
+            } else {
+                conversationHistory[0].content = currentSystemPrompt;
+            }
+
+
+            const payload = {
+                model: "openai",
+                messages: conversationHistory,
+                seed: Date.now() >>> 0,
+                // ADDED: referrer parameter
+                referrer: "feedforward.blog",
+                private: true
+            };
+            
+            // Clear input field
+            userPromptInput.value = '';
+            userPromptInput.focus();
+            
+            // 3. Display loading state
+            const loadingWrapper = document.createElement('div');
+            loadingWrapper.className = 'flex justify-start items-center text-gray-500 space-x-2 p-3';
+            loadingWrapper.innerHTML = `
+                <div class="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-blue-500"></div>
+                <span>AI is typing...</span>
+            `;
+            chatHistory.appendChild(loadingWrapper);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+            
+            generateBtn.disabled = true;
+
+            // 4. API Call
+            try {
+                const apiUrl = 'https://text.pollinations.ai/openai}';
+                const response = await axios.post(apiUrl, payload);
+                const generatedText = response.data.choices[0].message.content;
+
+                // 5. Display AI response and update history
+                appendMessage('ai', generatedText);
+
+            } catch (error) {
+                console.error('Error fetching text:', error);
+                let errorMessage = "Failed to generate a response. Please try again with another message";
+                if (error.response && error.response.data && error.response.data.error) {
+                    errorMessage = `API Error: ${error.response.data.error.message || 'Unknown error.'}`;
+                }
+
+                appendMessage('ai', errorMessage, true); 
+            } finally {
+                // 6. Cleanup
+                if (loadingWrapper.parentNode === chatHistory) {
+                    chatHistory.removeChild(loadingWrapper);
+                }
+                generateBtn.disabled = false;
+                userPromptInput.focus();
+            }
+        };
+
+        // --- Event Listener Attachment (Form) ---
+        if (chatForm) {
+            // Single listener handles both button click and Enter key press (the elegant way!)
+            chatForm.addEventListener('submit', handleGenerateText);
+        }
+    };
+    
+    // Start the initialization process
+    initializeChatbot();
+
+</script>
+<div id={id}>
+    <main class="w-full mb-8 overflow-hidden bg-gray-50">
+        <div class="px-4 py-2 text-left text-gray-500 font-mono bg-gray-100">
+            {title}
+        </div>
+        <div class="p-4 flex flex-col md:flex-row space-y-4 md:space-y-0 md:space-x-4">
+            <!-- Left Column: Input Prompt and Generate Button, wrapped in a FORM -->
+            <div class="flex flex-col md:w-1/2">
+                <form id={`chatForm-${id}`} class="flex flex-col">
+                    
+                    <!-- Dropdown (Bot Selector) -->
+                    <label for={`systemPromptSelect-${id}`} class="text-gray-700 font-semibold mb-2"><span class="mr-2">🤖</span>Select Bot:</label>
+                    <select 
+                        id={`systemPromptSelect-${id}`} 
+                        class="h-10 p-2 border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-md"
+                    >
+                        <!-- Options populated by JavaScript -->
+                    </select>
+
+                    <!-- System Prompt Textarea (Replaces API Messages) -->
+                    <label for={`systemPromptTextarea-${id}`} class="text-gray-700 font-semibold mt-4 mb-2"><span class="mr-2">🧠</span>System Prompt:</label>
+                    <textarea 
+                        id={`systemPromptTextarea-${id}`} 
+                        class="h-32 p-3 border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none rounded-md"
+                        placeholder="The AI's bot will appear here and is editable. Manual changes will reset the chat."
+                    ></textarea>
+
+                    <!-- User Input -->
+                    <label for={`userPromptInput-${id}`} class="text-gray-700 font-semibold mb-2 mt-4">Enter your message:</label>
+                    
+                    <!-- Switched back to input type=text for better form handling -->
+                    <input 
+                        id={`userPromptInput-${id}`} 
+                        type="text"
+                        placeholder="Type your message" 
+                        class="h-10 p-3 border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none rounded-md"
+                        value={userPromptValue}
+                    />
+                    
+                    <!-- The button is now type="submit" and triggers the form's submit event -->
+                    <button id={`generateBtn-${id}`} type="submit" class="mt-4 bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 transition duration-300 ease-in-out">
+                        Send Message
+                    </button>
+                </form>
+            </div>
+            
+            <!-- Right Column: Conversation History -->
+            <div class="md:w-1/2">
+                <div class="flex items-center text-gray-700 font-semibold mb-2">
+                    <span class="mr-2">💬</span>Conversation History
+                </div>
+                <!-- This container now holds the chat bubbles -->
+                <div id={`chatHistory-${id}`} class="chat-window h-96 border border-gray-300 bg-gray-200 text-gray-800 relative">
+                    <!-- Messages will be injected here by JavaScript -->
+                </div>
+                <div id={`loadingSpinner-${id}`} class="hidden"></div> 
+            </div>
+        </div>
+
+        <div class="px-4 py-2 text-base text-right text-gray-400">
+            Free API provided by <a href="https://pollinations.ai/" target="_blank">pollinations.ai</a>. If you experience errors, try different prompts or try again later.
+        </div>
+    </main>
+</div>

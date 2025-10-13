@@ -1,0 +1,353 @@
+---
+title: "Build a Chatbot: The 3 Message Roles" 
+description: "Understand the basics of messages and tracking conversation history "
+pubDate: 2025-08-27
+category: "Chatbot"
+tags: ["text-to-text", "chatbot"]
+featured: false
+thumb: "/images/build-chatbot-3-message-roles-thumb.jpg"
+---
+import ChatbotV1AIComponent from 'chatbot-v1-ai-component.astro';
+import TextAIComponent from 'text-ai-component.astro';  
+
+## My Goal
+In this entry, I want to build with a minimal, functioning chatbot with the following requirements:
+1. The user sends message.
+2. The bot receives user's message and respond accordingly.
+3. The interface displays conversation history.
+
+
+## Preview
+Besides the usual chatbot interface, I've included the raw API output so you can see how the conversation is maintained. Try different topics and see how it responds.
+
+<ChatbotV1AIComponent id="chatbot-v1-ai-1" prompt="Ask me a simple riddle"/>
+
+## What I've Learnt
+
+### Messages
+Text models are stateless by default. They will respond solely based on your last input without context of earlier interactions, so you need to keep track of the conversation history for them.
+
+```
+👤 USER MESSAGE  
+tell me a joke
+```
+
+```
+🤖 BOT MESSAGE  
+Why don't scientists trust atoms? Because they make up everything.
+```
+
+```
+👤 USER MESSAGE  
+why is that funny?
+```
+
+```
+🤖 BOT MESSAGE  
+Because of a pun. “Make up” has two meanings: atoms literally compose all matter, and “make up” can mean to invent or lie. The joke plays on that double meaning, mixing science with a playful twist
+```
+Conversation history has to be passed in `messages` array for the bot to retain memory. It contains chat messages between the user (`role: user`) and the bot (`role: assistant`). The `role: system` contains instructions to the bot / model.
+
+
+```typescript
+[
+  {
+    "role": "system",
+    "content": "You are a helpful assistant that responds with brief answers"
+  },
+  {
+    "role": "user",
+    "content": "tell me a joke"
+  },
+  {
+    "role": "assistant",
+    "content": "Why don't scientists trust atoms? Because they make up everything."
+  },
+  {
+    "role": "user",
+    "content": "why is that funny?"
+  },
+  {
+    "role": "assistant",
+    "content": "Because of a pun. “Make up” has two meanings: atoms literally compose all matter, and “make up” can mean to invent or lie. The joke plays on that double meaning, mixing science with a playful twist."
+  }
+]
+```
+
+### Roles
+
+OpenAI defines the following message roles in their [Model Spec](https://model-spec.openai.com/2025-04-11.html#definitions):
+
+> Role (required): specifies the source of each message. As described in Instructions and levels of authority and The chain of command, roles determine the authority of instructions in the case of conflicts.
+> - **system**: messages added by OpenAI **(aka model instructions)**
+> - developer: from the application developer / OpenAI
+> - **user**: input from end users, or a catch-all for data we want to provide to the model **(aka model input)**
+> - **assistant**: sampled from the language model **(aka model output)**
+
+The `system` role used to be the default for instructing OpenAI models, The `developer` role was recently introduced along with their reasoning models, carrying higher level of authority. The `system` role is interchangeable with `developer`, and it remains widely referenced due to its compatibility with older models.
+
+I prefer `system` given that it's a universal term that applies to Anthropic Claude and Google Gemini too, although each has their own JSON structure.
+
+### Context Window 
+
+The conversation is limited by how much text input the model can process. This limit, known as the "context window" is measured by "tokens". Many modern text models support a context window of about 100,000 tokens, or 75,000 words.
+
+Any text beyond that limit will be omitted, causing loss of context for older messages. A common solution is to summarise older interactions using text models and appending the summary into `system` content. This is necessary if your chatbot has to handle long user messages or prolonged interactions. I'm skipping this for now.
+
+## My Setup
+
+### API request
+Pollinations.AI is my preferred choice for prototyping. I'm using their [Text & Multimodal POST API](https://github.com/pollinations/pollinations/blob/master/APIDOCS.md#3-text--multimodal-openai-compatible-post-%EF%B8%8F%EF%B8%8F), which supports both text and other formats for chatbots. They have a GET API, which is good for simple text generation but less suitable for chat conversations. 
+
+
+```typescript
+POST https://text.pollinations.ai/openai
+```
+
+| Parameter | Description | Notes |
+| --------- | ----------- | ----- |
+| `messages` | An array of message objects (role: system, user, assistant). Used for Chat, Vision, STT. | Required for most tasks.|
+
+
+### Working code
+Save the below code into a HTML file and run directly from your web browser.
+
+```typescript
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Basic Chatbot</title>
+    <!-- Load external dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chat-window {
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            padding: 12px;
+            gap: 12px;
+        }
+    </style>
+</head>
+
+<body class="flex justify-center items-center p-4 min-h-screen">
+
+<div id="chatbotApp" class="w-full max-w-4xl">
+    <main class="w-full mb-8 overflow-hidden bg-gray-50 border border-gray-200 rounded-lg shadow-xl">
+        <div class="px-4 py-3 text-left text-gray-700 font-bold bg-gray-100 border-b border-gray-200 rounded-t-lg">
+            Basic Chatbot
+        </div>
+        
+        <div class="p-4 flex flex-col lg:flex-row space-y-4 lg:space-y-0 lg:space-x-4">
+            
+            <!-- Left Column: Input Prompt and API Messages -->
+            <div class="flex flex-col lg:w-1/2">
+                <label for="messageInput" class="text-gray-700 font-semibold mb-2">Enter your message:</label>
+                <textarea 
+                    id="messageInput" 
+                    placeholder="Type your message" 
+                    class="h-32 p-3 border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none rounded-lg"
+                ></textarea>
+
+                <label for="apiPayloadOutput" class="text-gray-700 font-semibold mt-4 mb-2"><span class="mr-2">📄</span>API Request Payload</label>
+                <div id="apiPayloadOutput" class=" h-32 p-3 border border-gray-300 rounded-lg bg-gray-200 text-gray-800 overflow-y-auto whitespace-pre-wrap"></div>
+                
+                <button id="sendButton" class="mt-4 bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-blue-700 transition duration-300 ease-in-out shadow-lg disabled:bg-gray-400">
+                    Send Message
+                </button>
+            </div>
+            
+            <!-- Right Column: Conversation History (Chat Window) -->
+            <div class="lg:w-1/2">
+                <div class="flex items-center text-gray-700 font-semibold mb-3">
+                    <span class="mr-2">💬</span>Conversation History
+                </div>
+                <div id="chatWindow" class="chat-window h-96 border border-gray-300 bg-gray-200 text-gray-800 relative rounded-lg">
+                    <!-- Messages will be injected here by JavaScript -->
+                </div>
+                <div id="loadingSpinner" class="hidden"></div> 
+            </div>
+        </div>
+
+        <div class="px-4 py-2 text-sm text-right text-gray-400 bg-gray-50 ">
+            Free API provided by <a href="https://pollinations.ai/" target="_blank" class="text-blue-500 hover:underline">pollinations.ai</a>. If you experience errors, try different prompts or try again later.
+        </div>
+    </main>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+    const APP_ID = 'chatbotApp'; // Consistent main container ID
+    const initialPrompt = "";
+
+    // Get the container element using the fixed ID.
+    const container = document.getElementById(APP_ID);
+    if (!container) {
+        console.error('Component container not found.');
+        return;
+    }
+
+    // Now, use querySelector to find the elements using the new, intuitive IDs.
+    const sendButton = container.querySelector('#sendButton');
+    const messageInput = container.querySelector('#messageInput');
+    const chatWindow = container.querySelector('#chatWindow');
+    const apiPayloadOutput = container.querySelector('#apiPayloadOutput');
+    // const loadingSpinner = container.querySelector('#loadingSpinner'); // Unused, but kept for reference
+
+    // Global variable to store conversation history, starting with the system instruction
+    let conversationHistory = [
+        {
+            role: "system",
+            content: "You are a helpful assistant that responds with brief answers"
+        }
+    ];
+
+    /**
+     * Appends a message bubble to the chat history container and optionally stores it in conversationHistory.
+     * @param {string} sender - 'user' or 'ai'
+     * @param {string} text - The content of the message
+     * @param {boolean} [isInternal=false] - If true, the message is displayed but NOT added to history (e.g., initial greeting).
+     */
+    const appendMessage = (sender, text, isInternal = false) => {
+        const messageWrapper = document.createElement('div');
+        const messageBubble = document.createElement('div');
+        
+        // Styling based on sender
+        if (sender === 'user') {
+            // User message: aligned right, dark background
+            messageWrapper.className = 'flex justify-end';
+            messageBubble.className = 'bg-gray-900 text-white p-3 max-w-lg rounded-xl rounded-br-none shadow-lg whitespace-pre-wrap break-words';
+        } else {
+            // AI message: aligned left, light background
+            messageWrapper.className = 'flex justify-start';
+            messageBubble.className = 'bg-white text-gray-800 p-3 max-w-lg rounded-xl rounded-bl-none shadow-lg whitespace-pre-wrap break-words';
+        }
+        
+        messageBubble.textContent = text;
+        messageWrapper.appendChild(messageBubble);
+        chatWindow.appendChild(messageWrapper);
+
+        // Store message in history if it's not an internal message
+        if (!isInternal) {
+            const role = sender === 'user' ? 'user' : 'assistant'; // API uses 'assistant' for AI responses
+            conversationHistory.push({ role, content: text });
+        }
+
+        // Scroll to the bottom of the chat history
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+    };
+    
+    // Set initial prompt if available (though usually empty for a chat)
+    if (initialPrompt) {
+        messageInput.value = initialPrompt;
+    }
+
+    // Initial welcome message 
+    appendMessage('ai', "Hello! I am a helpful assistant. How can I help you today?", true);
+
+    /**
+     * Handles the asynchronous text generation process for the chatbot.
+     */
+    const generateText = async () => {
+        const userPrompt = messageInput.value.trim();
+        if (!userPrompt) return;
+        
+        // 1. Display user message and update history
+        appendMessage('user', userPrompt); 
+        
+        // Construct the JSON payload using the entire conversation history
+        const payload = {
+            model: "openai",
+            seed: Date.now() >>> 0,
+            messages: conversationHistory, // Includes system role, user, and previous AI messages
+            private: true
+        };
+        
+        // Stringify the messages array for display (2 spaces for indentation)
+        const messagesJson = JSON.stringify(payload.messages, null, 2); 
+            
+        // Populate the API Messages Array container with the full history payload
+        if (apiPayloadOutput) {
+            apiPayloadOutput.textContent = messagesJson;
+            // Scroll to the top of the JSON output
+            apiPayloadOutput.scrollTop = 0;
+        }
+
+        // Clear input field and set focus
+        messageInput.value = '';
+        messageInput.focus();
+        
+        // 2. Display a temporary loading spinner message within the chat
+        const loadingWrapper = document.createElement('div');
+        loadingWrapper.className = 'flex justify-start items-center text-gray-500 space-x-2 p-3';
+        loadingWrapper.innerHTML = `
+            <div class="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-blue-500"></div>
+            <span class="text-sm italic">AI is typing...</span>
+        `;
+        chatWindow.appendChild(loadingWrapper);
+        chatWindow.scrollTop = chatWindow.scrollHeight;
+        
+        // Disable button during generation
+        sendButton.disabled = true;
+
+        try {
+            // New POST API endpoint
+            const apiUrl = 'https://text.pollinations.ai/openai';
+            
+            // Use axios.post to send the JSON payload
+            const response = await axios.post(apiUrl, payload);
+            
+            // Extract the generated text from the structured JSON response
+            const generatedText = response.data.choices[0].message.content;
+
+            // 3. Display AI response and update history
+            appendMessage('ai', generatedText);
+
+        } catch (error) {
+            console.error('Error fetching text:', error);
+            let errorMessage = "I apologize, I failed to generate a response. Please check the console for details.";
+            if (error.response && error.response.data && error.response.data.error) {
+                 errorMessage = `API Error: ${error.response.data.error.message || 'Unknown error.'}`;
+            }
+
+            // Display error message (not stored in history)
+            appendMessage('ai', errorMessage, true); 
+        } finally {
+            // Remove the temporary loading message
+            if (loadingWrapper.parentNode === chatWindow) {
+                chatWindow.removeChild(loadingWrapper);
+            }
+            // Re-enable the button
+            sendButton.disabled = false;
+        }
+    };
+
+    // Check if elements exist before adding event listeners
+    if (sendButton && messageInput) {
+        // Click event for the button
+        sendButton.addEventListener('click', generateText);
+
+        // Keydown event for the input field to trigger on "Enter"
+        messageInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); // Prevent the default form submission behavior
+                generateText();
+            }
+        });
+    }
+});
+</script>
+
+</body>
+</html>
+
+
+
+```
+
+
