@@ -10,10 +10,10 @@
   },
   "dependencies": {
     "@astrojs/mdx": "^4.3.4",
+    "@astrojs/partytown": "^2.1.4",
     "@tailwindcss/typography": "^0.5.16",
     "@tailwindcss/vite": "^4.1.8",
     "astro": "^5.9.0",
-    "partytown": "^0.0.0",
     "tailwindcss": "^4.1.8"
   }
 }
